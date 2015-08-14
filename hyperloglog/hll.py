@@ -3,6 +3,7 @@ This module implements probabilistic data structure which is able to calculate t
 """
 
 import math
+import numpy
 from hashlib import sha1
 from .const import rawEstimateData, biasData, tresholdData
 from .compat import *
@@ -61,15 +62,17 @@ def get_rho(w, max_width):
 
     return rho
 
+def sha1_64(value):
+    return long(sha1(bytes(value.encode() if isinstance(value, unicode) else value)).hexdigest()[:16], 16)
 
 class HyperLogLog(object):
     """
     HyperLogLog cardinality counter
     """
 
-    __slots__ = ('alpha', 'p', 'm', 'M')
+    __slots__ = ('alpha', 'p', 'm', 'M', 'hashfunc')
 
-    def __init__(self, error_rate):
+    def __init__(self, error_rate, hashfunc=sha1_64):
         """
         Implementes a HyperLogLog
 
@@ -88,7 +91,8 @@ class HyperLogLog(object):
         self.alpha = get_alpha(p)
         self.p = p
         self.m = 1 << p
-        self.M = [ 0 for i in range(self.m) ]
+        self.M = numpy.zeros(self.m, dtype = numpy.int8)
+        self.hashfunc = hashfunc
 
     def __getstate__(self):
         return dict([x, getattr(self, x)] for x in self.__slots__)
@@ -107,7 +111,7 @@ class HyperLogLog(object):
         # w = <x_{p}x_{p+1}..>
         # M[j] = max(M[j], rho(w))
 
-        x = long(sha1(bytes(value.encode() if isinstance(value, unicode) else value)).hexdigest()[:16], 16)
+        x = self.hashfunc(value)
         j = x & (self.m - 1)
         w = x >> self.p
 
@@ -122,13 +126,14 @@ class HyperLogLog(object):
             if self.m != item.m:
                 raise ValueError('Counters precisions should be equal')
 
-        self.M = [max(*items) for items in zip(*([ item.M for item in others ] + [ self.M ]))]
+        for other in others:
+            numpy.maximum(self.M, other.M, self.M)
 
     def __eq__(self, other):
         if self.m != other.m:
             raise ValueError('Counters precisions should be equal')
 
-        return self.M == other.M
+        return numpy.all(self.M == other.M)
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -137,7 +142,7 @@ class HyperLogLog(object):
         return round(self.card())
 
     def _Ep(self):
-        E = self.alpha * float(self.m ** 2) / sum(math.pow(2.0, -x) for x in self.M)
+        E = self.alpha * float(self.m ** 2) / numpy.power(2.0, -self.M).sum()
         return (E - estimate_bias(E, self.p)) if E <= 5 * self.m else E
 
     def card(self):
@@ -146,7 +151,7 @@ class HyperLogLog(object):
         """
 
         #count number or registers equal to 0
-        V = self.M.count(0)
+        V = len(self.M) - numpy.count_nonzero(self.M)
 
         if V > 0:
             H = self.m * math.log(self.m / float(V))

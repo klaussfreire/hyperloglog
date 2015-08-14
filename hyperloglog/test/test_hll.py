@@ -119,7 +119,7 @@ class HyperLogLogTestCase(TestCase):
         for x in range(100):
             a.add(str(x))
         b = pickle.loads(pickle.dumps(a))
-        self.assertEqual(a.M, b.M)
+        self.assertEqual(list(a.M), list(b.M))
         self.assertEqual(a.alpha, b.alpha)
         self.assertEqual(a.p, b.p)
         self.assertEqual(a.m, b.m)
